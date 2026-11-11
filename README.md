@@ -1,5 +1,7 @@
 # Test Framework
 
+<img src="media/icon.png" alt="Test Framework icon" width="128" height="128">
+
 Private scenario automation; explicit testing launcher only.
 
 ## Install
