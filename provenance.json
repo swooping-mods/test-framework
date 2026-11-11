@@ -1,0 +1,50 @@
+{
+  "schema": "mod-source-hashes/v1",
+  "source_files": {
+    "mods/test-framework/core.h": {
+      "export_sha256": "ee707c779ce21c4fe3ed9c31ffa599a5be40283730cdf2b99fa418827dd02f05"
+    },
+    "mods/test-framework/mod.c": {
+      "export_sha256": "2afdb619f3da46d77d7c1c825a9bb084d041a4f2b98d4f027a24f416eafe2836"
+    },
+    "mods/test-framework/mod.json": {
+      "export_sha256": "c61d71517408e6dc714148114ae393ba4d3b90b2241812a54b59a34573e4cafb"
+    },
+    "mods/test-framework/sdk/testing.h": {
+      "export_sha256": "1d9ab92be64409928e19c2c58b93bf52843b5a8a31150d04b07a3f644e8f15cf"
+    },
+    "mods/test-framework/stats_guard.h": {
+      "export_sha256": "ffb8ce29636f961bb0114741815e36c10dd7fcc21ec1ac88d62de0f000c5a536"
+    },
+    "runtime/native/gameplay.h": {
+      "export_sha256": "7676362469a7972f54f9c7304d41d32396b4f81cc9a9f9935983c54b90cb061d"
+    },
+    "runtime/native/hook_context.h": {
+      "export_sha256": "28f6c6502f3b4d6e8ae02c06e60b6d3b7f1b8674d0a5f20ac42664ea3133d016"
+    },
+    "runtime/native/hook_engine.h": {
+      "export_sha256": "2cea82d754c1792bc3eddfba10261c7de7eb0a33316cc5d1aa28a99ee78882df"
+    },
+    "runtime/native/services.h": {
+      "export_sha256": "1178e09c77f30f53bbccbfbacf8771e5faad1cf79753703d90dfd0a1e0fbadeb"
+    },
+    "runtime/sdk/context.h": {
+      "export_sha256": "6c84145cc761550c4943aa10c52242a538e92243f79a1b20c65b6a4ef9e82605"
+    },
+    "runtime/sdk/hooks.h": {
+      "export_sha256": "7c006f1254dd6a130f56dac499ba8196fb84ee4883443ee4f12d601534df56ec"
+    },
+    "runtime/sdk/native_adapters/reflection.h": {
+      "export_sha256": "613aca15342aabf7313107e0f7eb060c5bcbdc54e06ebc7d73fe09037bd952e2"
+    },
+    "runtime/sdk/services.h": {
+      "export_sha256": "72de584c98cf0ca6367f5decd4416c78fa4eeea44b4b48401d0737a44b2c7a2b"
+    },
+    "runtime/sdk/services_client.h": {
+      "export_sha256": "17f670371f5798457301b14c046daa99632c9685cc2c5f78921c3fe53d095479"
+    },
+    "runtime/sdk/vehicle_input.h": {
+      "export_sha256": "6af332b456ff9fb74e96a6e963a8cf9627bd51a8edca55f07b6e5a829b9da790"
+    }
+  }
+}
