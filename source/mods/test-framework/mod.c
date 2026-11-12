@@ -3,20 +3,35 @@
 #include "../../runtime/sdk/native_adapters/reflection.h"
 #include "../../runtime/native/services.h"
 #include "core.h"
+static void mf_stats_note(unsigned,U64);
+#define MF_STATS_NOTE mf_stats_note
 #include "stats_guard.h"
 int _fltused = 0;
 static MFRunner mf;
 static PTR mf_log, mf_alive_method, mf_restoring, mf_focused, mf_world_field;
+static PTR mf_stats_log;
+static unsigned mf_stats_noted;
 static PTR mf_joined, mf_host_id, mf_local_id, mf_path, mf_quit;
+static PTR mf_menu_blocked;
+static PTR mf_steam_initialized;
+static PTR mf_game;
 static PTR mf_menu_start, mf_menu_slot, mf_menu_privacy, mf_menu_play, mf_slot_used;
 static PTR mf_menu_chosen, mf_menu_private, mf_menu_kit;
 static DWORD mf_thread;
 static U64 mf_frame, mf_sequence, mf_quit_frame;
+static U64 mf_wait_logged;
 static int mf_boot, mf_boot_stage, mf_boot_frames, mf_ready_frames, mf_invite;
 static U64 (*mf_clock)(void);
 static int (*mf_string_length)(PTR);
 static const unsigned short *(*mf_string_chars)(PTR);
 static char mf_run[96], mf_expected_profile[1024], mf_selection[12288];
+static void mf_stats_note(unsigned index,U64 count){
+    unsigned bit=1u<<index,seen=__atomic_fetch_or(&mf_stats_noted,bit,__ATOMIC_RELAXED);
+    if(!mf_stats_log||((seen&bit)&&count%65536))return;
+    char buffer[512],*end=cat(buffer,"{\"api\":\"");end=cat(end,mf_stats_names[index]);
+    end=cat(end,"\",\"count\":");end=num(end,count);end=cat(end,",\"thread\":");end=num(end,GetCurrentThreadId());end=cat(end,"}\n");
+    DWORD written=0;WriteFile(mf_stats_log,buffer,(DWORD)(end-buffer),&written,0);FlushFileBuffers(mf_stats_log);
+}
 
 static char *mf_quote(char *out, const char *value, unsigned limit) {
     *out++ = '"';
@@ -45,6 +60,25 @@ static void mf_write(char *buffer, char *end) {
 static void mf_event(const char *event) {
     char buffer[512], *end = mf_prefix(buffer, event); mf_write(buffer, end);
 }
+static int mf_isolate_stats(void){
+    if(mf_stats_active)return 1;
+    /* Wait for the real initialized context. Interface thunks can be aliased
+     * across Steam interfaces, so rejection is scoped to this exact receiver. */
+    int ok=1;
+    if(!mf_steam_initialized||!boolean(mf_steam_initialized,0,&ok)||!ok)return 0;
+    PTR getter=dmethod("Steamworks","CSteamAPIContext","GetSteamUserStats","");
+    PTR (*return_type)(PTR)=(PTR(*)(PTR))GetProcAddress(mf_game,"il2cpp_method_get_return_type");
+    if(!getter||!return_type){mf_event("steam-stats-binding-missing");return -1;}
+    char *type=da.type_name(return_type(getter));
+    int valid=type&&deq(type,"System.IntPtr");if(type)da.free(type);
+    if(!valid){mf_event("steam-stats-return-type-rejected");return -1;}
+    PTR value=call(getter,0,0,&ok),receiver=0;
+    if(ok&&value)dcopy(&receiver,unbox(value),sizeof(receiver));
+    if(!ok||!receiver){mf_event("steam-stats-receiver-missing");return -1;}
+    PTR sdk=GetModuleHandleA("steam_api64.dll");
+    if(!sdk||!mf_stats_install(sdk,receiver)){mf_event("steam-stats-isolation-failed");return -1;}
+    mf_event("steam-stats-isolated");return 1;
+}
 static void mf_report(void *user, const char *event, const MoonTestCase *test,
                       int status, const char *reason, unsigned assertions, int cleanup_ok) {
     (void)user;
@@ -59,6 +93,8 @@ static void mf_report(void *user, const char *event, const MoonTestCase *test,
         end = cat(end, ",\"count\":"); end = num(end, mf.finished); mf_quit_frame = mf_frame + 3;
         end=cat(end,",\"steam_stats_isolated\":");end=cat(end,mf_stats_active?"true":"false");
         end=cat(end,",\"steam_mutations_blocked\":");end=num(end,__atomic_load_n(&mf_stats_rejected,__ATOMIC_RELAXED));
+        end=cat(end,",\"steam_unrelated_calls_forwarded\":");end=num(end,__atomic_load_n(&mf_stats_forwarded,__ATOMIC_RELAXED));
+        end=cat(end,",\"steam_stats_receiver_scoped\":true");
     }
     mf_write(buffer, end);
 }
@@ -122,6 +158,7 @@ static void mf_update(void *walker, void *user) {
     (void)user;
     if (mf_thread && mf_thread != GetCurrentThreadId()) return;
     mf_thread = GetCurrentThreadId(); mf_frame++;
+    if(!mf_stats_active&&mf_isolate_stats()!=1)return;
     if (mf_quit_frame && mf_frame >= mf_quit_frame) {
         int ok = 1; call(mf_quit, 0, 0, &ok); mf_quit_frame = 0; return;
     }
@@ -132,7 +169,18 @@ static void mf_update(void *walker, void *user) {
     if (mf_host()) flags |= MF_HOST;
     if (boolean(mf_focused, 0, &ok) && ok) flags |= MF_FOCUSED;
     if (!mf.sealed) {
-        if ((flags & (MF_READY | MF_HOST | MF_FOCUSED)) != (MF_READY | MF_HOST | MF_FOCUSED)) { mf_ready_frames = 0; return; }
+        int input_ok=1;
+        int menu_blocked=(flags&MF_READY)?boolean(mf_menu_blocked,walker,&input_ok):1;
+        U64 now=mf_clock();
+        if(now-mf_wait_logged>=1000){
+            mf_wait_logged=now;char buffer[700],*end=mf_prefix(buffer,"world-wait");
+            end=cat(end,",\"flags\":");end=num(end,flags);end=cat(end,",\"frame\":");end=num(end,mf_frame);
+            end=cat(end,",\"menu_blocked\":");end=num(end,(U64)menu_blocked);
+            end=cat(end,",\"steam_mutations_blocked\":");end=num(end,__atomic_load_n(&mf_stats_rejected,__ATOMIC_RELAXED));
+        end=cat(end,",\"steam_unrelated_calls_forwarded\":");end=num(end,__atomic_load_n(&mf_stats_forwarded,__ATOMIC_RELAXED));
+        end=cat(end,",\"steam_stats_receiver_scoped\":true");mf_write(buffer,end);
+        }
+        if ((flags & (MF_READY | MF_HOST | MF_FOCUSED)) != (MF_READY | MF_HOST | MF_FOCUSED)||menu_blocked||!input_ok) { mf_ready_frames = 0; return; }
         if (++mf_ready_frames < 5) return;
         if (!mf_profile_matches()) { mf_event("profile-mismatch"); mf.complete = 1; mf_quit_frame = mf_frame + 3; return; }
         if (!mf_seal()) { mf_event("selection-rejected"); mf.complete = 1; mf_quit_frame = mf_frame + 3; return; }
@@ -143,9 +191,15 @@ static void mf_update(void *walker, void *user) {
 }
 static int mf_menu(int id, Context *context) {
     (void)id;
-    if (!mf_boot || mf_boot_stage >= 4 || mf.complete) return 0;
+    if(mf.complete)return 0;
     if (mf_thread && mf_thread != GetCurrentThreadId()) return 0;
     mf_thread = GetCurrentThreadId();
+    int isolated=mf_isolate_stats();
+    if(isolated!=1){
+        if(isolated<0){int quit_ok=1;mf.complete=1;call(mf_quit,0,0,&quit_ok);}
+        return 0;
+    }
+    if(!mf_boot||mf_boot_stage>=4)return 0;
     if (++mf_boot_frames < 8) return 0;
     PTR menu = (PTR)context->rcx, kit = 0;
     field_value(menu, mf_menu_kit, &kit);
@@ -186,10 +240,11 @@ __declspec(dllexport) int MoonLab_ModStart(PTR domain, PTR game) {
     cat(cat(path, folder), "\\fast-tests.jsonl");
     mf_log = CreateFileA(path, 0x40000000, 1, 0, 1, 0x80, 0);
     if (mf_log == (PTR)(U64)-1 || !bind_runtime(domain, game) || !dapi(game)) return 0;
-    PTR steam=GetModuleHandleA("steam_api64.dll");
-    if(!steam)steam=LoadLibraryA("MoonSweepers_Data\\Plugins\\x86_64\\steam_api64.dll");
-    if(!mf_stats_install(steam)){mf_event("steam-stats-isolation-failed");return 0;}
-    mf_event("steam-stats-isolated");
+    mf_game=game;
+    cat(cat(path,folder),"\\fast-stats.jsonl");mf_stats_log=CreateFileA(path,0x40000000,1,0,1,0x80,0);
+    if(mf_stats_log==(PTR)(U64)-1)return 0;
+    int isolated=mf_isolate_stats();if(isolated<0)return 0;
+    if(!isolated)mf_event("steam-stats-isolation-pending");
     mf_clock = (U64 (*)(void))GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetTickCount64");
     mf_string_length = (int (*)(PTR))GetProcAddress(game, "il2cpp_string_length");
     mf_string_chars = (const unsigned short *(*)(PTR))GetProcAddress(game, "il2cpp_string_chars");
@@ -202,6 +257,8 @@ __declspec(dllexport) int MoonLab_ModStart(PTR domain, PTR game) {
     MF_BIND(mf_joined, "MoonCleaners", "MoonCrew", "get_Joined", "");
     MF_BIND(mf_host_id, "MoonCleaners", "MoonCrew", "get_HostId", "");
     MF_BIND(mf_local_id, "Steamworks", "SteamUser", "GetSteamID", "");
+    MF_BIND(mf_steam_initialized,"MoonCleaners","MoonSteam","get_Initialized","");
+    MF_BIND(mf_menu_blocked,"MoonCleaners","MoonWalker","get_MenuBlocked","");
     mf_world_field = get_field(find_class("MoonCleaners", "MoonWalker"), "world");
     if (!mf_clock || !mf_string_length || !mf_string_chars || !mf_world_field) return 0;
     mf.report = mf_report;
@@ -225,10 +282,12 @@ __declspec(dllexport) int MoonLab_ModStart(PTR domain, PTR game) {
         static_get(invite, &mf_invite);
         PTR menu = find_class("MoonCleaners", "MoonMainMenu");
         mf_menu_chosen = get_field(menu, "chosenSlot"); mf_menu_private = get_field(menu, "chosenPrivacy"); mf_menu_kit = get_field(menu, "kit");
-        if (!mf_menu_chosen || !mf_menu_private || !mf_menu_kit ||
-            !prepare_hook(dmethod("MoonCleaners", "MoonMainMenu", "Animate", ""), 100668108, 0, game)) return 0;
-        before_hook = mf_menu; if (!install_hooks()) return 0;
+        if (!mf_menu_chosen || !mf_menu_private || !mf_menu_kit) return 0;
     }
+    /* Every private run guards the native menu before a world starts, including
+     * manual starts. Only the optional boot flag invokes menu operations. */
+    if(!prepare_hook(dmethod("MoonCleaners","MoonMainMenu","Animate",""),100668108,0,game))return 0;
+    before_hook=mf_menu;if(!install_hooks())return 0;
 #undef MF_BIND
     const MoonRuntimeApiV1 *runtime = moon_runtime_connect();
     const MoonServiceLimitV1 limits[] = {{"max_cases", MF_LIMIT}};

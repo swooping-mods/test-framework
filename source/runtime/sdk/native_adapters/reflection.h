@@ -34,8 +34,9 @@ static inline PTR dtype(const char *ns,const char *name){PTR k=find_class(ns,nam
 static inline DRoot dhold(PTR p){return p?da.hold(p,0):0;}
 static inline PTR dget(DRoot r){return r?da.target(r):0;}
 static inline void ddrop(DRoot *r){if(*r)da.drop(*r);*r=0;}
-static inline float dnumber(PTR m,PTR self,int *ok){float f=0;PTR v=call(m,self,0,ok);if(v)dcopy(&f,unbox(v),sizeof(f));else *ok=0;return f;}
-static inline DVec dvector(PTR m,PTR self,int *ok){DVec v={0};PTR p=call(m,self,0,ok);if(p)dcopy(&v,unbox(p),sizeof(v));else *ok=0;return v;}
+/* Copy only an admitted payload; callers retain finite-value/domain policy. */
+static inline float dnumber(PTR m,PTR self,int *ok){float f=0;PTR v=call(m,self,0,ok);PTR data=*ok&&v?unbox(v):0;if(data)dcopy(&f,data,sizeof(f));else *ok=0;return f;}
+static inline DVec dvector(PTR m,PTR self,int *ok){DVec v={0};PTR p=call(m,self,0,ok);PTR data=*ok&&p?unbox(p):0;if(data)dcopy(&v,data,sizeof(v));else *ok=0;return v;}
 static inline int dapi(PTR game){
 #define DA(F,N,T) da.F=(T)GetProcAddress(game,"il2cpp_" N);if(!da.F){da.failed="il2cpp_" N;return 0;}
     DA(methods,"class_get_methods",PTR(*)(PTR,PTR *));DA(param,"method_get_param",PTR(*)(PTR,DWORD));

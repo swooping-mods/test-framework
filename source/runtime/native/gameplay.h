@@ -41,8 +41,10 @@ static PTR call(PTR m,PTR self,void **args,int *ok){
     if(!m){*ok=0;return 0;}PTR exception=0;PTR value=invoke(m,self,args,&exception);
     if(exception)*ok=0;return value;
 }
-static int integer(PTR m,PTR self,int *ok){PTR v=call(m,self,0,ok);if(!v){*ok=0;return 0;}return *(int *)unbox(v);}
-static int boolean(PTR m,PTR self,int *ok){PTR v=call(m,self,0,ok);if(!v){*ok=0;return 0;}return *(unsigned char *)unbox(v)!=0;}
+/* A nonnull result box does not establish a readable value payload. Preserve
+ * sticky query failure and the historical zero defaults without dereferencing it. */
+static int integer(PTR m,PTR self,int *ok){PTR v=call(m,self,0,ok);PTR data=*ok&&v?unbox(v):0;if(!data){*ok=0;return 0;}return *(int *)data;}
+static int boolean(PTR m,PTR self,int *ok){PTR v=call(m,self,0,ok);PTR data=*ok&&v?unbox(v):0;if(!data){*ok=0;return 0;}return *(unsigned char *)data!=0;}
 
 #define BIND(NAME,TYPE) NAME=(TYPE)GetProcAddress(game,"il2cpp_" #NAME);if(!NAME)return 0
 static int bind_runtime(PTR domain,PTR game){
